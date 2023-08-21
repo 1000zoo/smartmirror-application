@@ -277,7 +277,7 @@ class TakePictureScreenState extends State<TakePictureScreen> {
             if (cnt > 50) {
               await _controller.stopImageStream();
               faceDetector.close();
-              // takePicture();
+              takePicture();
               getToast("촬영이 완료되었습니다.", size:50, gravity: ToastGravity.TOP, toastLength: Toast.LENGTH_LONG);
 
               if (!mounted) return;
