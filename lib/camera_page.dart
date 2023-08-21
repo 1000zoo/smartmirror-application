@@ -1,4 +1,5 @@
 import 'package:ediya/main.dart';
+import 'package:ediya/person.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
 import 'constant.dart';
@@ -12,6 +13,7 @@ import 'package:camera/camera.dart';
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'dart:math';
 import 'api_util.dart';
 
@@ -45,15 +47,30 @@ class _CameraPageState extends State<CameraPage> {
       }
     }
   }
+  Future<bool> barcodeScanAndNavigate(String bar) async {
+    String name = await getPatientsName(bar);
+    if (await isContains(bar) && !canStartImageStream) {
+      await _controller.stopImageStream();
+      if (!mounted) return false;
+      Navigator.push(
+          context, takePictureScreen(bar, name)
+      );
+      return true;
+    } else {
+      getToast("등록되지 않은 바코드입니다.");
+      setState(() {});
+      return false;
+    }
+  }
 
   void barcodeProcess() async {
     canStartImageStream = false;
-    int barcodeCounts = BARCODE_COUNTS; //너무 빨리 찍히는 거 방지
+    int barcodeCounts = BARCODE_COUNTS; // 너무 빨리 찍히는 거 방지
     await _controller.startImageStream((CameraImage image) async {
       InputImageData iid = getIID(image);
       Uint8List bytes = getBytes(image);
       if (pageIndex == 1 || pageIndex == 2) {
-        _controller.stopImageStream();
+        await _controller.stopImageStream();
         canStartImageStream = true;
       }
 
@@ -64,29 +81,16 @@ class _CameraPageState extends State<CameraPage> {
         } else {
           if (barcodes.isNotEmpty) {
             barcodeCounts = BARCODE_COUNTS;
-            final bar = barcodes[0].rawValue.toString();
-            if (await isContains(bar) && !canStartImageStream) {
-              String name = await getPatientsName(bar);
-              if (name != ERROR_NAME) {
-                _controller.stopImageStream();
-                if (!mounted) return;
-                Navigator.push(
-                    context,
-                    CupertinoPageRoute(
-                        builder: (context) => TakePictureScreen(
-                            controller: _controller,
-                            barcode: bar,
-                            name: name)));
-              } else {
-              getToast("등록되지 않은 바코드입니다.");
-              setState(() {});
-            }}
-          }}});
+            String barcode = barcodes[0].rawValue.toString();
+            await barcodeScanAndNavigate(barcode);
+          }
+        }
+      });
     });
   }
 
   void _toastTextEdit() {
-    //
+    debugPrint(_textStream.text);
   }
 
   @override
@@ -111,6 +115,36 @@ class _CameraPageState extends State<CameraPage> {
     super.dispose();
   }
 
+  CupertinoPageRoute takePictureScreen(String bar, String name) {
+    return CupertinoPageRoute(
+        builder: (context) => TakePictureScreen(
+          controller: _controller,
+          barcode: bar,
+          name: name
+        ));
+  }
+
+  Future<void> pyshicsScanner(String bar)  async {
+    if (await barcodeScanAndNavigate(bar) && bar.length == 8) {
+      setState(() {
+        _textStream.clear();
+      });
+    } else {
+      if (bar.length == 8) {
+        getToast("등록되지 않은 바코드입니다.");
+        if (!mounted) return;
+        Navigator.push(
+            context,
+            CupertinoPageRoute(
+                builder: (context) => const Dummy()
+            )
+        );
+        setState(() {
+          _textStream.clear();
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -126,42 +160,13 @@ class _CameraPageState extends State<CameraPage> {
               alignment: Alignment.center,
               children: [
                 CupertinoTextField(
-                  autofocus: true,
-                  showCursor: false,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  keyboardType: TextInputType.none,
-                  onChanged: (bar) async {
-                    if (await isContains(bar) && !canStartImageStream) {
-                      _controller.stopImageStream();
-                      String name = await getPatientsName(bar);
-                      if (!mounted) return;
-                      Navigator.push(
-                          context,
-                          CupertinoPageRoute(
-                              builder: (context) => TakePictureScreen(
-                                controller: _controller,
-                                barcode: bar,
-                                name: name
-                              )));
-                      _textStream.clear();
-                    } else {
-                      if (bar.length == 8) {
-                        getToast("등록되지 않은 바코드입니다.");
-                        if (!mounted) return;
-                        Navigator.push(
-                          context,
-                          CupertinoPageRoute(
-                            builder: (context) => const Dummy()
-                          )
-                        );
-                        setState(() {
-                          _textStream.clear();
-                        });
-                      }
-                    }
-                  },
-                  controller: _textStream,
+                    autofocus: true,
+                    showCursor: false,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    keyboardType: TextInputType.none,
+                    onChanged: (bar) => pyshicsScanner(bar),
+                    controller: _textStream
                 ),
                 SizedBox(
                     height: h, width: w,
@@ -204,7 +209,7 @@ class TakePictureScreen extends StatefulWidget {
     Key? key,
     required this.controller,
     required this.barcode,
-    required this.name,
+    required this.name
   }) : super(key: key);
 
   @override
@@ -216,6 +221,7 @@ class TakePictureScreenState extends State<TakePictureScreen> {
   late int time;
   final int num = Random().nextInt(NUM_OF_IMAGES) + 1;
   bool isDisposed = false;
+  bool isLoading = true;
 
   String imagePath(String barcode, String name) {
     var newFileName = "$name-${barcode}_${nowString()}.png";
@@ -224,11 +230,12 @@ class TakePictureScreenState extends State<TakePictureScreen> {
 
   Future<void> saveImagePath(XFile? tempImage) async {
     if (tempImage == null) return;
+    String name = widget.name;
     String dir = (await getApplicationDocumentsDirectory()).path;
-    String newPath = join(dir, imagePath(widget.barcode, widget.name));
+    String newPath = join(dir, imagePath(widget.barcode, name));
 
     File temp = await File(tempImage.path).copy(newPath);
-    GallerySaver.saveImage(temp.path, albumName: widget.name);
+    GallerySaver.saveImage(temp.path, albumName: name);
     await uploadImage(temp);
   }
 
@@ -238,44 +245,99 @@ class TakePictureScreenState extends State<TakePictureScreen> {
     // 카메라 컨트롤러 초기화
     time = TIMER_MAX;
     _controller = widget.controller;
-    timer();
+    _controller.initialize().then((_) => faceDetection());
   }
 
-
-  void timer() {
-    const oneSec = Duration(seconds: 1);
+  void faceDetection() async {
+    setState(() {
+      isLoading = false;
+    });
     getToast(
-      "촬영이 시작되었습니다. 얼굴 전체가 나올 수 있도록, 정면을 응시해주시길 바랍니다.",
-      size:40,
-      gravity: ToastGravity.CENTER,
-      textColor: PHOTO_NOTICE_TEXT_COLOR,
-      backgroundColor: PHOTO_NOTICE_BACKGROUND_COLOR,
+        "정면을 똑바로 응시하면, 촬영이 시작됩니다."
     );
-    if (!isDisposed) {
-      Timer.periodic(
-          oneSec,
-              (_) {
-            if (time == 0 && !canStartImageStream) {
-              takePicture();
-              // print("찰칵");
-              time = TIMER_MAX;
-              canStartImageStream = true;
+    canStartImageStream = false;
+    final options = FaceDetectorOptions(
+        enableClassification: true,
+        enableLandmarks: true,
+        enableTracking: true
+    );
+    final faceDetector = FaceDetector(options: options);
+    var cnt = 0;
+
+    _controller.startImageStream((CameraImage image) async {
+      InputImageData iid = getIID(image);
+      Uint8List bytes = getBytes(image);
+
+      final InputImage inputImage = InputImage.fromBytes(bytes: bytes, inputImageData: iid);
+      faceDetector.processImage(inputImage).then((List<Face> faces) async {
+        if (faces.length == 1) {
+          Face face = faces[0];
+          if (isReadyForShot(face)) {
+            cnt++;
+            if (cnt > 50) {
+              await _controller.stopImageStream();
+              faceDetector.close();
+              // takePicture();
               getToast("촬영이 완료되었습니다.", size:50, gravity: ToastGravity.TOP, toastLength: Toast.LENGTH_LONG);
 
               if (!mounted) return;
               Navigator.of(context).pop();
-              return;
-            } else if (time > 0) {
-              if (mounted){
-                getToast(
-                  time.toString(), size:100, gravity: ToastGravity.TOP,
-                  textColor: PHOTO_NOTICE_TEXT_COLOR,
-                  backgroundColor: PHOTO_NOTICE_BACKGROUND_COLOR
-                );
-                setState(() {
-                  time--;
-                });
-              }}});
+            } else {
+              getToast(
+                  "곧 촬영이 시작됩니다. 눈을 뜨고 약 1초가 기다려주세요.",
+                  gravity: ToastGravity.CENTER
+              );
+            }
+          } else {
+            getToast("정면을 똑바로 응시해주세요.");
+            cnt = 0;
+          }
+
+        } else if (faces.isNotEmpty) {
+          getToast(
+              "화면에 한 명만 들어와야 합니다.\n현재 ${faces.length} 인식"
+          );
+        }
+      });
+    });
+  }
+
+  bool isReadyForShot(Face face) {
+    return isFaceForward(face) && isOpenEyes(face);
+  }
+
+  bool isOpenEyes(Face face) {
+    if (face.rightEyeOpenProbability! > 0.3 && face.leftEyeOpenProbability! > 0.3) return true;
+    getToast("눈을 떠주세요.", gravity: ToastGravity.TOP);
+    return false;
+  }
+
+  bool isFaceForward(Face face) {
+    var x = face.headEulerAngleX!;
+    var y = face.headEulerAngleY!;
+    var z = face.headEulerAngleZ!;
+    return accept(x) && accept(y) && accept(z);
+    // return accept(x, lm:"고개를 오른쪽으로 돌리세요.", rm:"고개를 왼쪽으로 돌리세요.") &&
+    //     accept(y, lm:"고개를 아래로 내리세요.", rm:"고개를 위로 올리세요.") &&
+    //     accept(z, lm:"오른쪽으로 기울었습니다.", rm:"왼쪽으로 기울었습니다.");
+  }
+
+  bool accept(double d,
+      {String lm = "", String rm = ""}
+      ) {
+    if (d.abs() <= ANGLE_LIMIT) {
+      return true;
+    }
+    if (d < -ANGLE_LIMIT) {
+      if (lm.isNotEmpty) {
+        getToast(lm, toastLength: Toast.LENGTH_SHORT);
+      }
+      return false;
+    } else {
+      if (rm.isNotEmpty) {
+        getToast(rm);
+      }
+      return false;
     }
   }
 
@@ -309,23 +371,10 @@ class TakePictureScreenState extends State<TakePictureScreen> {
         child: Stack(
             children: [
               SizedBox(
-                width: w, height: h,
-                child: Image.asset("assets/img/img$num.png")
-              ),
-              Column(
-                  children: const [
-                    SizedBox(
-                      width: 200, height: 100,
-                    ),
-                  ]),
-              Column(
-                children: [
-                  SizedBox(width: w * 0.3, height: h / 1.3),
-                  SizedBox(
-                    width: w / 5, height: h / 5,
-                    child: CameraPreview(_controller)
-                  )])
-            ]));
+                  width: w, height: h,
+                  child: isLoading ?
+                  const CupertinoActivityIndicator(): CameraPreview(_controller)
+              )]));
   }
 }
 
@@ -355,8 +404,8 @@ class _DummyState extends State<Dummy> {
     super.initState();
     const oneSec = Duration(milliseconds: 500);
     Timer.periodic(
-      oneSec,
-        (_) {
+        oneSec,
+            (_) {
           Navigator.of(context).pop();
         }
     );
@@ -378,4 +427,9 @@ Uint8List getBytes(CameraImage image) {
   return Uint8List.fromList(
       image.planes.fold(<int>[], (List<int> previousValue, element) => previousValue
         ..addAll(element.bytes)));
+}
+
+class AlwaysDisabledFocusNode extends FocusNode {
+  @override
+  bool get hasFocus => false;
 }
