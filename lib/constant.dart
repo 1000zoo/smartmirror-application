@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 
 ///IP address & Port
-const IP = "http://192.168.0.45";
+const IP = "http://192.168.0.12";
 const PORT = 8080;
 
 const SERVER_ADDRESS = "$IP:$PORT";

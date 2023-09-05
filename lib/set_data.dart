@@ -211,7 +211,6 @@ class _SetDataState extends State<SetData> {
                         Person person = Person(_nameController.text, barcode,
                             _gender, _birthDay.toString());
                         addPatients(person);
-                        getToast("등록이 완료되었습니다!");
                         setState(() {
                           initState();
                           rollBack();
